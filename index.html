@@ -1,0 +1,79 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Floor-Based Warehouse Simulation</title><style>
+*{box-sizing:border-box}body{margin:0;background:#0c1423;color:#eaf2ff;font:15px Arial, sans-serif}header{padding:18px 24px;background:#14233a;border-bottom:1px solid #304966}h1{margin:0}p{color:#aebfd6}main{max-width:1500px;margin:auto;padding:18px}.tabs,.controls{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:12px}button{padding:10px 14px;border-radius:10px;border:1px solid #496687;background:#213651;color:#fff;font-weight:bold;cursor:pointer}button.active{background:#2877c8}.stage{position:relative;background:#17263b;border:1px solid #45617f;border-radius:15px;overflow:hidden}canvas{width:100%;height:auto;display:block}.metrics{position:absolute;left:12px;top:12px;display:flex;gap:8px;flex-wrap:wrap}.metric{background:#0c1728e8;border:1px solid #45617f;border-radius:10px;padding:9px 12px;font-size:13px}.timeline{height:8px;background:#263b56;border-radius:9px;margin:12px 0}.timeline div{height:100%;width:0;background:linear-gradient(90deg,#45b9e9,#4bd19a)}.legend{display:flex;gap:14px;flex-wrap:wrap;color:#c0d1e5}.note{font-size:13px;line-height:1.5}
+</style></head><body><header><h1>Warehouse Organization Simulation</h1><p>Six workers · SKU-specific floor slots · multiple small cartons per SKU · no racks</p></header><main><div class="tabs"><button id="amul" class="active">Amul Distribution Centre</button><button id="rel">Reliance FMCG Warehouse</button></div><div class="controls"><button id="play">▶ Start live simulation</button><button id="pause">Ⅱ Pause</button><button id="reset">↻ Reset to empty</button><button id="finish">✓ Show final organized layout</button><button id="s1" class="active">1×</button><button id="s2">2×</button><button id="s4">4×</button></div><div class="stage"><canvas id="cv" width="1400" height="900"></canvas><div class="metrics"><span class="metric" id="status">Empty warehouse</span><span class="metric" id="skuCount">SKU slots: 0</span><span class="metric" id="cartonCount">Cartons: 0</span><span class="metric">Workers: 6</span></div></div><div class="timeline"><div id="bar"></div></div><div id="phase">Ready · empty floor</div><div class="legend" id="legend"></div><p class="note">SKU slots are distinct floor locations; each location contains several small illustrative cartons. The exact carton quantity is illustrative and can be changed. Workers route from a receiving/gate staging point, with door and aisle clearances kept free.</p></main><script>
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d'),CW=1400,CH=900;let site='amul',speed=1,running=false,state='empty',last=0,slots=[],workers=[],done=0,phase='Empty floor · ready';const wc=['#ffce55','#63d4f2','#f27b91','#9be18e','#b7a0ff','#ffa66b'];
+const amulNames=['Lactose-Free Milk','Amul Gold','Amul Taaza','Sweet Lassi','Namkeen Lassi','Chaas','Tru Chocolate','Mango Dairy Drink','Litchi Dairy Drink','Apple Dairy Drink','Kadhai Doodh','Royal Kesar','Royal Premium','Kesar Badam','Cafe Can','Cool Cafe Can','Tea Mix','Ghee Pure','Ghee','Amul Ras','Tea Special','Kaju Katli','Kesar Peda','Rasgulla','Milk Cake','Besan Laddu','Gulab Jamun','Motichur','Mithai Made','Khakra','Fruit & Nut Chocolate','Dark Sugarfree 90','Amul Moti','Cookies','Butter Gold Biscuits','Ice Cream SKU 1','Ice Cream SKU 2','Ice Cream SKU 3','Ice Cream SKU 4','Ice Cream SKU 5','Ice Cream SKU 6','Ice Cream SKU 7','Ice Cream SKU 8','Ice Cream SKU 9','Ice Cream SKU 10'];
+const relNames=['Campa Cola','Campa Orange','Campa Lemon','Campa Purple Variant','Dark/Cola Beverage','Blue-label Beverage','Packaged Water','Classic Salted Chips','Masala Chips','Tomato Chips','Cream & Onion Chips','Kettle Cooked Chips','Peri Peri / Corn Snack','Snack SKU 14','Snack SKU 15','Beverage SKU 16','Beverage SKU 17','Beverage SKU 18','Beverage SKU 19'];
+function reset(){running=false;state='empty';done=0;slots=[];phase='Empty floor · ready';buildSlots();workers=Array.from({length:6},(_,i)=>({x:gate.x+(i-2.5)*24,y:gate.y-28,task:null,carry:false,stage:0,route:[],ri:0}));update();draw()}
+let gate={x:700,y:820};
+function buildSlots(){if(site==='amul')buildAmulSlots();else buildRelSlots();slots.forEach((s,i)=>{s.cartons=4+(i%3);s.placed=false;s.origin={x:gate.x+(i%6-2.5)*18,y:gate.y-45};s.target={x:s.x+s.w/2,y:s.y+s.h/2}})}
+function buildAmulSlots(){
+ slots=[];
+ // 22 chilled items and mithai inside Ice Storage 1; 13 ambient SKUs in central storage; 10 ice-cream SKUs in Ice Storage 2.
+ makeGridSlots(uniqueAmulChilled(),{x:65,y:225,w:350,h:555},'CHILLED · GREEN','green',4,44);
+ makeGridSlots(amulNames.slice(22,35),{x:490,y:215,w:320,h:530},'AMBIENT · YELLOW','yellow',4,48);
+ makeGridSlots(amulNames.slice(35,45),{x:875,y:390,w:260,h:390},'FROZEN · BLUE', 'blue',3,46);
+}
+function uniqueAmulChilled(){return amulNames.slice(0,22)}
+function buildRelSlots(){slots=[];makeGridSlots(relNames.slice(7,15),{x:55,y:125,w:1290,h:235},'BACK · CHIPS & SNACKS','orange',4,55);makeGridSlots(relNames.slice(0,7).concat(relNames.slice(15)),{x:55,y:490,w:1290,h:220},'FRONT · BEVERAGES','blue',4,55)}
+function makeGridSlots(names,z,title,color,colsOverride=null,aisleGap=0){
+ const cols=colsOverride||Math.min(names.length,5),rows=Math.ceil(names.length/cols),cw=z.w/cols,ch=z.h/rows;
+ names.forEach((n,i)=>{let c=i%cols,r=Math.floor(i/cols);
+ slots.push({name:n,zone:title,color,x:z.x+c*cw+5,y:z.y+r*ch+5,w:cw-aisleGap/2-10,h:ch-aisleGap/2-10});});
+}
+function move(w,p,dt){let dx=p.x-w.x,dy=p.y-w.y,d=Math.hypot(dx,dy);if(d<4){w.x=p.x;w.y=p.y;return true}let step=Math.min(d,125*speed*dt);w.x+=dx/d*step;w.y+=dy/d*step;return false}
+function routeFor(slot){
+ const tx=slot.target.x,ty=slot.target.y;
+ if(site==='amul'){
+  if(slot.zone.includes('CHILLED'))return [{x:700,y:785},{x:470,y:785},{x:470,y:545},{x:452,y:545},{x:420,y:545},{x:tx,y:ty}];
+  if(slot.zone.includes('FROZEN'))return [{x:700,y:785},{x:820,y:785},{x:820,y:575},{x:862,y:575},{x:tx,y:ty}];
+  // Central storage lanes: route through the central aisle and the row-end cross-lane, not through SKU blocks.
+  return [{x:700,y:785},{x:700,y:175},{x:465,y:175},{x:465,y:190},{x:tx,y:190},{x:tx,y:ty}];
+ }
+ // Reliance: entrance -> central cross aisle -> end-of-block aisle -> slot's aisle-side access.
+ let yCross=420;
+ if(slot.zone.includes('BACK')) {const entry={x:slot.x+slot.w/2,y:slot.y+slot.h+12};return [{x:700,y:785},{x:700,y:455},{x:700,y:395},{x:entry.x,y:395},{x:entry.x,y:entry.y}];}
+ const entry={x:slot.x+slot.w/2,y:slot.y-12};return [{x:700,y:785},{x:700,y:455},{x:entry.x,y:455},{x:entry.x,y:entry.y}];
+}
+function assign(){let avail=slots.filter(s=>!s.placed&&!workers.some(w=>w.task===s));workers.forEach(w=>{if(!w.task&&avail.length){let s=avail.shift();w.task=s;w.stage=0;w.carry=false;w.route=[s.origin,...routeFor(s)];w.ri=0}})}
+function tick(dt){assign();workers.forEach(w=>{if(!w.task)return;let s=w.task;if(w.stage===0){if(move(w,s.origin,dt)){w.carry=true;w.stage=1;w.route=routeFor(s);w.ri=0}}else{if(move(w,w.route[w.ri],dt)){w.ri++;if(w.ri>=w.route.length){w.carry=false;s.placed=true;done++;w.task=null;w.stage=0}}}});if(done===slots.length){running=false;state='organized';phase='Final verification · all SKU spaces organized'}else phase=done<slots.length*.25?'Receiving & identifying SKUs':done<slots.length*.6?'Slotting SKU floor spaces':done<slots.length*.85?'Stacking small cartons in each SKU space':'Checking gate, doors and aisle clearances'}
+function drawAmulLayout(){
+ // Amul site sketch: washroom, Ice Storage 1, full central storage,
+ // extended Ice Storage 2 within central/right area and separate office.
+ ctx.fillStyle='#f2f4f7';ctx.fillRect(35,60,1330,770);ctx.strokeStyle='#17345d';ctx.lineWidth=9;ctx.strokeRect(35,60,1330,770);
+ ctx.fillStyle='#e2e6eb';ctx.fillRect(35,60,405,110);ctx.strokeRect(35,60,405,110);label('WASHROOM',237,125,23,'#18345c');
+ ctx.fillStyle='#dcefff';ctx.fillRect(35,170,405,660);ctx.strokeRect(35,170,405,660);label('ICE STORAGE 1 · CHILLED',237,202,20,'#155b95');
+ ctx.fillStyle='#fff3dd';ctx.fillRect(440,60,710,770);ctx.strokeRect(440,60,710,770);label('CENTRAL STORAGE',795,112,23,'#17345d');
+ // Ice Storage 2 is longer and remains outside the office boundary.
+ ctx.fillStyle='#dcefff';ctx.fillRect(850,300,300,530);ctx.strokeRect(850,300,300,530);label('ICE STORAGE 2 · FROZEN',1000,335,20,'#155b95');
+ ctx.fillStyle='#e5e8ef';ctx.fillRect(1150,60,215,770);ctx.strokeRect(1150,60,215,770);label('OFFICE',1257,145,23,'#17345d');
+ // Main central walking lane, with clear branches to room doors and gate.
+ ctx.fillStyle='#d7e2ee';ctx.fillRect(465,135,660,42);ctx.fillRect(465,185,40,560);ctx.fillRect(770,185,40,560);ctx.fillRect(465,745,345,40);label('CENTRAL WALKING LANE',795,160,14,'#17345d');
+ ctx.fillStyle='#d7e2ee';ctx.fillRect(455,190,35,580);ctx.fillRect(815,190,35,600);ctx.fillRect(465,750,660,38);ctx.fillRect(820,350,35,230);
+ // Ice Storage 1 doorway and clear landing
+ ctx.fillStyle='#f2f4f7';ctx.fillRect(430,485,22,70);ctx.strokeStyle='#17345d';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(440,485);ctx.lineTo(475,485);ctx.lineTo(475,555);ctx.stroke();label('DOOR',480,475,12,'#17345d');
+ // Ice Storage 2 doorway
+ ctx.fillStyle='#f2f4f7';ctx.fillRect(840,535,22,70);ctx.strokeStyle='#17345d';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(850,535);ctx.lineTo(885,535);ctx.lineTo(885,605);ctx.stroke();label('DOOR',885,530,12,'#17345d');
+ // Office access
+ ctx.fillStyle='#f2f4f7';ctx.fillRect(1140,635,22,70);ctx.strokeStyle='#17345d';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(1150,635);ctx.lineTo(1185,635);ctx.lineTo(1185,705);ctx.stroke();label('OFFICE DOOR',1205,625,12,'#17345d');
+ // Recessed main gate, kept free of SKU blocks
+ ctx.fillStyle='#17263b';ctx.fillRect(620,820,160,10);ctx.fillStyle='#d5dfeb';ctx.fillRect(620,760,160,70);ctx.strokeStyle='#17345d';ctx.lineWidth=7;ctx.strokeRect(620,760,160,70);label('MAIN GATE · KEEP CLEAR',700,805,16,'#17345d');
+ ctx.strokeStyle='#c84a4a';ctx.lineWidth=2;ctx.setLineDash([8,5]);ctx.strokeRect(415,475,75,90);ctx.strokeRect(825,525,75,90);ctx.strokeRect(1125,625,85,85);ctx.strokeRect(600,740,200,90);ctx.setLineDash([]);
+}
+function drawRelLayout(){
+ ctx.fillStyle='#f1f4f7';ctx.fillRect(35,60,1330,770);ctx.strokeStyle='#17345d';ctx.lineWidth=9;ctx.strokeRect(35,60,1330,770);
+ ctx.fillStyle='#fff0df';ctx.fillRect(45,70,1310,320);ctx.fillStyle='#e0f1ff';ctx.fillRect(45,455,1310,280);
+ label('BACK · CHIPS & SNACKS',700,110,23,'#b65d18');label('FRONT · BEVERAGES',700,490,23,'#165b95');
+ // Defined walking network around slot blocks
+ ctx.fillStyle='#d7e2ee';ctx.fillRect(45,385,1310,70);ctx.fillRect(650,455,100,280);ctx.fillRect(650,70,100,315);ctx.fillRect(45,455,1310,35);ctx.fillRect(45,720,1310,35);
+ ctx.strokeStyle='#17345d';ctx.lineWidth=8;ctx.beginPath();ctx.moveTo(35,420);ctx.lineTo(570,420);ctx.moveTo(830,420);ctx.lineTo(1365,420);ctx.stroke();label('MAIN CROSS AISLE · CLEAR',700,416,16,'#17345d');
+ ctx.fillStyle='#d8e1eb';ctx.fillRect(620,770,160,60);ctx.strokeRect(620,770,160,60);label('MAIN GATE · KEEP CLEAR',700,805,16,'#17345d');
+}
+function drawSlot(s){let col=s.color==='green'?'#48b987':s.color==='blue'?'#5ab2ec':s.color==='yellow'?'#e6bd50':'#f3a05a';ctx.fillStyle=col+'33';ctx.strokeStyle=col;ctx.lineWidth=2.5;ctx.fillRect(s.x,s.y,s.w,s.h);ctx.strokeRect(s.x,s.y,s.w,s.h);ctx.fillStyle='#15243a';ctx.font='bold 11px Arial';ctx.textAlign='center';ctx.fillText(s.name.length>23?s.name.slice(0,22)+'…':s.name,s.x+s.w/2,s.y+15);ctx.textAlign='left';if(s.placed){let rows=2,cols=Math.ceil(s.cartons/rows);for(let i=0;i<s.cartons;i++){let cx=s.x+7+(i%cols)*Math.min(25,(s.w-14)/cols),cy=s.y+25+Math.floor(i/cols)*24;ctx.fillStyle='#c99b67';ctx.fillRect(cx,cy,Math.min(23,s.w/cols-2),20);ctx.strokeStyle='#815b35';ctx.strokeRect(cx,cy,Math.min(23,s.w/cols-2),20);ctx.strokeStyle='#9b7043';ctx.beginPath();ctx.moveTo(cx+7,cy+3);ctx.lineTo(cx+7,cy+17);ctx.stroke()}}}
+function draw(){ctx.clearRect(0,0,CW,CH);ctx.fillStyle='#26374c';ctx.fillRect(0,0,CW,CH);site==='amul'?drawAmulLayout():drawRelLayout();slots.forEach(drawSlot);drawWorkers();ctx.fillStyle='#fff';ctx.font='bold 23px Arial';ctx.fillText(state==='empty'?'EMPTY WAREHOUSE · READY TO RECEIVE SKU CARTONS':'SKU-SPECIFIC FLOOR SLOT ORGANIZATION',45,42)}
+function drawWorkers(){workers.forEach((w,i)=>{ctx.fillStyle='#0007';ctx.beginPath();ctx.ellipse(w.x,w.y+6,13,5,0,0,Math.PI*2);ctx.fill();ctx.fillStyle=wc[i];ctx.beginPath();ctx.arc(w.x,w.y,13,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#102238';ctx.lineWidth=2;ctx.stroke();ctx.fillStyle='#102238';ctx.font='bold 10px Arial';ctx.fillText('W'+(i+1),w.x-8,w.y+4);if(w.carry){ctx.fillStyle='#c99b67';ctx.fillRect(w.x+13,w.y-12,24,24);ctx.strokeRect(w.x+13,w.y-12,24,24)}})}
+function label(t,x,y,size,color){ctx.fillStyle=color;ctx.font=`bold ${size}px Arial`;ctx.textAlign='center';ctx.fillText(t,x,y);ctx.textAlign='left'}function doorArc(x,y){ctx.strokeStyle='#17345d';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(x-35,y);ctx.lineTo(x+35,y);ctx.stroke();ctx.beginPath();ctx.arc(x-35,y,35,0,Math.PI/2);ctx.stroke()}
+function update(){document.getElementById('status').textContent='Status: '+(running?'Organizing':state==='organized'?'Organized':'Empty / paused');document.getElementById('skuCount').textContent='SKU slots: '+slots.length+' ('+done+' completed)';document.getElementById('cartonCount').textContent='Cartons placed: '+slots.filter(s=>s.placed).reduce((a,s)=>a+s.cartons,0)+' / '+slots.reduce((a,s)=>a+s.cartons,0);document.getElementById('bar').style.width=(done/slots.length*100)+'%';document.getElementById('phase').textContent='Phase: '+phase;document.getElementById('legend').innerHTML=site==='amul'?'<span>🟩 Chilled & Mithai · Ice Storage 1</span><span>🟨 Ambient · Central storage</span><span>🟦 Frozen · Ice Storage 2</span><span>Clear doors, gate and walking lanes</span>':'<span>🟦 Front: beverages</span><span>🟧 Back: snacks</span><span>19 distinct SKU slots</span><span>Clear gate and aisle</span>'}
+function loop(t){let dt=Math.min(.05,(t-last)/1000||.016);last=t;if(running){tick(dt);update()}draw();requestAnimationFrame(loop)}
+document.getElementById('amul').onclick=()=>{site='amul';document.getElementById('amul').classList.add('active');document.getElementById('rel').classList.remove('active');reset()};document.getElementById('rel').onclick=()=>{site='rel';document.getElementById('rel').classList.add('active');document.getElementById('amul').classList.remove('active');reset()};document.getElementById('play').onclick=()=>{if(state==='empty'){state='running';phase='Receiving and assigning SKU spaces'}running=true};document.getElementById('pause').onclick=()=>running=false;document.getElementById('reset').onclick=reset;document.getElementById('finish').onclick=()=>{running=false;state='organized';done=slots.length;slots.forEach(s=>s.placed=true);workers.forEach(w=>w.task=null);phase='Completed · access and safety verification';update();draw()};['s1','s2','s4'].forEach((id,i)=>document.getElementById(id).onclick=()=>speed=[1,2,4][i]);reset();requestAnimationFrame(loop);
+</script></body></html>
